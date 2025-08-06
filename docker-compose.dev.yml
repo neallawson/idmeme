@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:0.1
+    # Expose internal 11434 to host 11435 to avoid clashing with local install
+    ports:
+      - "11435:11434"
+    volumes:
+      - ./models:/root/.ollama/models
+
+  backend:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.dev
+    environment:
+      - PORT=3000
+      - OLLAMA_BASE_URL=http://ollama:11434
+    ports:
+      - "3000:3000"
+    depends_on:
+      - ollama
+    volumes:
+      - ./src/backend:/app
+      - /app/node_modules
+
+  # Placeholder for frontend dev container (optional)
+  # frontend:
+  #   build:
+  #     context: ./src/frontend
+  #     dockerfile: Dockerfile.dev
+  #   ports:
+  #     - "5173:5173"
+  #   depends_on:
+  #     - backend

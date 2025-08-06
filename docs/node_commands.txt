@@ -1,0 +1,23 @@
+To move forward you’ll need the workspace dependencies:
+
+bash
+# run from repo root
+npm install          # installs root + backend + frontend deps
+
+Dev workflows:
+  - Local host Ollama → backend only
+
+bash
+npm --workspace=src/backend run dev
+
+
+  - Isolated stack with containerised Ollama
+
+bash
+npm run dev:docker   # builds/starts compose (ollama + backend)
+
+
+  - Frontend (once deps installed) in another terminal:
+
+bash
+npm --workspace=src/frontend run dev

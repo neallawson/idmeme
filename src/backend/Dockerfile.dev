@@ -1,0 +1,13 @@
+# Dev container for idmeme backend
+FROM node:18-alpine
+
+# Install dependencies first (better cache)
+WORKDIR /app
+COPY package.json package-lock.json* pnpm-lock.yaml* ./
+RUN npm install --legacy-peer-deps --no-audit --progress=false
+
+# Copy source
+COPY . .
+
+EXPOSE 3000
+CMD ["npm","run","dev"]

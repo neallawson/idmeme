@@ -1,0 +1,35 @@
+# Node & general
+node_modules/
+.DS_Store
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# SvelteKit build output
+.svelte-kit/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# SQLite database
+*.sqlite
+*.db
+
+# Ollama models (mounted volume)
+models/
+
+# Docker
+*.container
+
+# Logs
+logs/
+*.log
+
+# IDE / Editor
+.idea/
+.vscode/
+
+# Mac & Linux system files
+*.swp
