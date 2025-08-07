@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS images (
   hash TEXT NOT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  tags TEXT
+  tags_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_images_hash_size ON images(hash, size);
 
@@ -34,6 +34,23 @@ CREATE TABLE IF NOT EXISTS ingest_queue (
   FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ingest_status ON ingest_queue(status);
+
+-- key-value table for arbitrary tags
+CREATE TABLE IF NOT EXISTS images_kv (
+  image_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT,
+  FOREIGN KEY(image_id) REFERENCES images(id)
+);
+CREATE INDEX IF NOT EXISTS idx_kv_key ON images_kv(key);
+CREATE INDEX IF NOT EXISTS idx_kv_key_val ON images_kv(key,value);
+
+-- Full-text search virtual table (FTS5)
+CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
+  image_id UNINDEXED,
+  full_text
+);
+
 `;
 
 // Run multiple statements
@@ -48,13 +65,39 @@ export type ImageRow = {
   hash: string;
   created_at: string;
   updated_at: string;
-  tags?: string;
+  tags_json?: string;
 };
 
-export function insertOrIgnoreImage(row: ImageRow) {
-  const stmt = db.prepare(`INSERT OR IGNORE INTO images (path, size, hash, created_at, updated_at, tags)
-    VALUES (@path, @size, @hash, @created_at, @updated_at, @tags)`);
-  stmt.run(row);
+export function insertOrIgnoreImage(row: ImageRow): number {
+  const stmt = db.prepare(`INSERT OR IGNORE INTO images (path, size, hash, created_at, updated_at, tags_json)
+    VALUES (@path, @size, @hash, @created_at, @updated_at, @tags_json)`);
+  const info = stmt.run(row);
+  // If row existed, fetch its id
+  if (info.changes === 0) {
+    const existing = db.prepare('SELECT id FROM images WHERE path = ?').get(row.path) as { id: number };
+    return existing.id;
+  }
+  return info.lastInsertRowid as number;
+}
+
+export function upsertKv(imageId: number, kv: Record<string, any>) {
+  const insert = db.prepare('INSERT INTO images_kv (image_id, key, value) VALUES (?, ?, ?)');
+  const tx = db.transaction((obj: Record<string, any>) => {
+    db.prepare('DELETE FROM images_kv WHERE image_id = ?').run(imageId);
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v)) {
+        v.forEach(val => insert.run(imageId, k, String(val)));
+      } else if (v !== undefined && v !== null) {
+        insert.run(imageId, k, String(v));
+      }
+    }
+  });
+  tx(kv);
+}
+
+export function upsertFts(imageId: number, fullText: string) {
+  db.prepare('DELETE FROM images_fts WHERE image_id = ?').run(imageId);
+  db.prepare('INSERT INTO images_fts (image_id, full_text) VALUES (?, ?)').run(imageId, fullText);
 }
 
 export function getImageByHashSize(hash: string, size: number): ImageRow | undefined {
