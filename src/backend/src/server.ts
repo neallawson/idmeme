@@ -2,9 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-import { enqueuePaths, searchImagesAdvanced } from './db';
+import { enqueuePaths, searchImagesAdvanced, db } from './db';
 import { startWorker } from './ingestWorker';
 import dotenv from 'dotenv';
+import { Readable } from 'stream';
 
 dotenv.config();
 
@@ -30,7 +31,18 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     // Stream Ollama response back to client unchanged (supports SSE/streaming)
     res.status(response.status);
-    response.body?.pipe(res);
+    if (response.body) {
+      try {
+        // Node 18+ ReadableStream -> Node stream
+        Readable.fromWeb(response.body as any).pipe(res);
+      } catch {
+        // Fallback: buffer and send
+        const buf = Buffer.from(await response.arrayBuffer());
+        res.send(buf);
+      }
+    } else {
+      res.end();
+    }
   } catch (err) {
     console.error('Ollama proxy error', err);
     res.status(500).json({ error: 'Ollama proxy failed' });
@@ -95,8 +107,48 @@ app.post('/api/ingest', (req, res) => {
 
 app.get('/api/ingest', (_req, res) => {
   // simple listing for now
-  const rows = (global as any).db?.prepare?.('SELECT * FROM ingest_queue ORDER BY id DESC LIMIT 100').all() ?? [];
+  const rows = db.prepare('SELECT * FROM ingest_queue ORDER BY id DESC LIMIT 100').all();
   res.json(rows);
+});
+
+// Ingest summary (counts by status)
+app.get('/api/ingest/summary', (req, res) => {
+  const afterId = req.query.afterId ? Number(req.query.afterId) : undefined;
+  const where = afterId ? 'WHERE id > ?' : '';
+  const totalStmt = db.prepare(`SELECT COUNT(*) as c FROM ingest_queue ${where}`);
+  const total = afterId
+    ? (totalStmt.get(afterId) as { c: number }).c
+    : (totalStmt.get() as { c: number }).c;
+  const groupStmt = db.prepare(`SELECT status, COUNT(*) as c FROM ingest_queue ${where} GROUP BY status`);
+  const rows = (afterId
+    ? groupStmt.all(afterId)
+    : groupStmt.all()) as { status: string; c: number }[];
+  const map: Record<string, number> = { pending: 0, hashing: 0, classifying: 0, done: 0, failed: 0 };
+  for (const r of rows) map[r.status] = r.c;
+  res.json({ total, ...map });
+});
+
+// Currently classifying items (for previews)
+app.get('/api/ingest/current', (req, res) => {
+  const afterId = req.query.afterId ? Number(req.query.afterId) : undefined;
+  const rows = (afterId
+    ? db
+        .prepare(
+          "SELECT id, path, status, started_at FROM ingest_queue WHERE status = 'classifying' AND id > ? ORDER BY started_at ASC LIMIT 4"
+        )
+        .all(afterId)
+    : db
+        .prepare(
+          "SELECT id, path, status, started_at FROM ingest_queue WHERE status = 'classifying' ORDER BY started_at ASC LIMIT 4"
+        )
+        .all());
+  res.json(rows);
+});
+
+// Max id in ingest queue (for clients to set baseline)
+app.get('/api/ingest/max-id', (_req, res) => {
+  const row = db.prepare('SELECT COALESCE(MAX(id), 0) as maxId FROM ingest_queue').get() as { maxId: number };
+  res.json(row);
 });
 
 import { getPrompt, setPrompt, DEFAULT_PROMPT, getMaxConcurrency, setMaxConcurrency } from './settings';
@@ -158,7 +210,7 @@ app.get('/api/search', (req, res) => {
 });
 
 app.get('/api/ingest/:id', (req, res) => {
-  const row = (global as any).db?.prepare?.('SELECT * FROM ingest_queue WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM ingest_queue WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'not found' });
   res.json(row);
 });

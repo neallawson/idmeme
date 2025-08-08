@@ -7,7 +7,7 @@ const DB_FILE = process.env.DB_FILE ?? path.join(process.cwd(), 'idmeme.sqlite')
 // Ensure DB directory exists
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 
-const db = new Database(DB_FILE);
+export const db = new Database(DB_FILE);
 
 // Create schema if not exists
 const schema = `

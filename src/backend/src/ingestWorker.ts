@@ -27,6 +27,8 @@ async function processJob() {
 
     // Deduplicate check is done by INSERT OR IGNORE
     inFlight++;
+    // Mark stage: classifying (after hashing)
+    updateJobStatus(job.id!, 'classifying');
     const tagsStr = await classifyImage(job.path);
     const tagsJson = tagsStr?.trim() || '{}';
     if (tagsJson === '{}' || tagsJson === '') {
