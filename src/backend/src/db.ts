@@ -100,6 +100,36 @@ export function upsertFts(imageId: number, fullText: string) {
   db.prepare('INSERT INTO images_fts (image_id, full_text) VALUES (?, ?)').run(imageId, fullText);
 }
 
+export function searchImagesAdvanced(filters: Record<string, string>, q?: string, limit = 100): ImageRow[] {
+  const filterKeys = Object.keys(filters);
+  let sql = `SELECT DISTINCT i.* FROM images i`;
+  const params: any[] = [];
+  if (q) {
+    sql += ' JOIN images_fts f ON f.image_id = i.id';
+  }
+  if (filterKeys.length) {
+    sql += ' JOIN images_kv kv ON kv.image_id = i.id';
+  }
+  const wheres: string[] = [];
+  if (q) {
+    wheres.push('f.full_text MATCH ?');
+    params.push(q);
+  }
+  if (filterKeys.length) {
+    const sub = filterKeys
+      .map(k => {
+        params.push(k, filters[k]);
+        return '(kv.key = ? AND kv.value = ?)';
+      })
+      .join(' AND ');
+    wheres.push(sub);
+  }
+  if (wheres.length) sql += ' WHERE ' + wheres.join(' AND ');
+  sql += ' ORDER BY i.created_at DESC LIMIT ?';
+  params.push(limit);
+  return db.prepare(sql).all(...params) as ImageRow[];
+}
+
 export function getImageByHashSize(hash: string, size: number): ImageRow | undefined {
   return db.prepare('SELECT * FROM images WHERE hash = ? AND size = ?').get(hash, size);
 }

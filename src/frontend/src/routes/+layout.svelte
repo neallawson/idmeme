@@ -14,6 +14,7 @@
   <a class="hover:underline" href="/">Home</a>
   <a class="hover:underline" href="/ingest">Ingest</a>
   <a class="hover:underline" href="/gallery">Gallery</a>
+  <a class="hover:underline" href="/search">Search</a>
   <a class="hover:underline" href="/ai-settings">AI Settings</a>
 </nav>
 

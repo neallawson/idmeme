@@ -4,10 +4,13 @@ import { getNextPendingJob, updateJobStatus, insertOrIgnoreImage } from './db';
 import { hashFile } from './hashing';
 import { classifyImage } from './ollama';
 
-// Process one job every interval
-const INTERVAL_MS = 2000;
+// Process jobs at a fast tick but limit concurrent runs via settings
+const TICK_MS = 500; // polling interval
+import { getMaxConcurrency } from './settings';
+let inFlight = 0;
 
 async function processJob() {
+  if (inFlight >= getMaxConcurrency()) return;
   const job = getNextPendingJob();
   if (!job) return; // nothing pending
 
@@ -23,6 +26,7 @@ async function processJob() {
     const hash = await hashFile(job.path);
 
     // Deduplicate check is done by INSERT OR IGNORE
+    inFlight++;
     const tagsStr = await classifyImage(job.path);
     const tagsJson = tagsStr?.trim() || '{}';
     let parsed: Record<string, any> = {};
@@ -54,9 +58,11 @@ async function processJob() {
   } catch (err: any) {
     console.error('Ingest job failed', err);
     updateJobStatus(job.id!, 'failed', err.message);
+  } finally {
+    inFlight = Math.max(0, inFlight - 1);
   }
 }
 
 export function startWorker() {
-  setInterval(processJob, INTERVAL_MS);
+  setInterval(processJob, TICK_MS);
 }

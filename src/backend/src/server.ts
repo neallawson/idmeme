@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-import { enqueuePaths } from './db';
+import { enqueuePaths, searchImagesAdvanced } from './db';
 import { startWorker } from './ingestWorker';
 import dotenv from 'dotenv';
 
@@ -97,6 +97,64 @@ app.get('/api/ingest', (_req, res) => {
   // simple listing for now
   const rows = (global as any).db?.prepare?.('SELECT * FROM ingest_queue ORDER BY id DESC LIMIT 100').all() ?? [];
   res.json(rows);
+});
+
+import { getPrompt, setPrompt, DEFAULT_PROMPT, getMaxConcurrency, setMaxConcurrency } from './settings';
+
+// Serve local image files safely
+app.get('/api/file', (req, res) => {
+  const p = (req.query.path as string) ?? '';
+  if (!p) return res.status(400).json({ error: 'path required' });
+  // Basic protection: only allow absolute paths and image extensions
+  const allowedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'];
+  const ext = path.extname(p).toLowerCase();
+  if (!allowedExt.includes(ext)) return res.status(400).json({ error: 'unsupported file' });
+  if (!fs.existsSync(p) || !fs.statSync(p).isFile()) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.sendFile(path.resolve(p));
+});
+
+// Prompt API
+app.get('/api/prompt', (_req, res) => {
+  const current = getPrompt();
+  res.json({ prompt: current, isDefault: current === DEFAULT_PROMPT });
+});
+
+app.put('/api/prompt', (req, res) => {
+  const { prompt } = req.body as { prompt?: string };
+  setPrompt(prompt && prompt.trim() ? prompt : undefined);
+  res.json({ ok: true });
+});
+
+// Settings API (currently only concurrency)
+app.get('/api/settings', (_req, res) => {
+  res.json({ maxConcurrency: getMaxConcurrency() });
+});
+
+app.put('/api/settings', (req, res) => {
+  const { maxConcurrency } = req.body as { maxConcurrency?: number };
+  if (maxConcurrency && Number.isFinite(maxConcurrency) && maxConcurrency >= 1) {
+    setMaxConcurrency(Number(maxConcurrency));
+  }
+  res.json({ ok: true });
+});
+
+// Search API
+app.get('/api/search', (req, res) => {
+  const { q, limit } = req.query as { q?: string; limit?: string };
+  const filters: Record<string, string> = {};
+  Object.entries(req.query).forEach(([k, v]) => {
+    if (k === 'q' || k === 'limit') return;
+    if (typeof v === 'string') filters[k] = v;
+  });
+  try {
+    const rows = searchImagesAdvanced(filters, q, limit ? Number(limit) : 100);
+    res.json(rows);
+  } catch (err) {
+    console.error('search error', err);
+    res.status(500).json({ error: 'search failed' });
+  }
 });
 
 app.get('/api/ingest/:id', (req, res) => {
