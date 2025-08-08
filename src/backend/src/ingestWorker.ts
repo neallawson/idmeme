@@ -29,6 +29,11 @@ async function processJob() {
     inFlight++;
     const tagsStr = await classifyImage(job.path);
     const tagsJson = tagsStr?.trim() || '{}';
+    if (tagsJson === '{}' || tagsJson === '') {
+      updateJobStatus(job.id!, 'failed', 'empty AI result');
+      return;
+    }
+
     let parsed: Record<string, any> = {};
     try {
       parsed = JSON.parse(tagsJson);
