@@ -3,28 +3,33 @@ import path from 'path';
 
 const CONFIG_PATH = process.env.IDMEME_CONFIG ?? path.join(process.cwd(), 'config.json');
 
-export const DEFAULT_PROMPT = `You are an expert meme analyst being called upon to help analyze and classify images so that a search engine can\
-find them later. Here is the name and description of the fields that will comprise your response. The format of the response follows after this list. \
-Field "category" is one word best describing the main category of the meme.  Field "keywords" is for key concepts, actions, locations, and actors present \
-in the meme. Field "style" lists the artistic style(s)/medium of the meme. Field "intent": Memes are often clever, sarcastic, ironic, satirical, \
-or otherwise complex and creative. Try to discern the intent of the meme (examples: to mock some person or organization, making fun of a news headline, \
-making a pun, etc.) and store a short description in the "intent" field. Field "characters": List any recognizable characters in "characters" so searching \
-for people or institutions finds relevant memes. Field "text": Memes also feature quotes and text that is insightful in discerning the meaning. Include \
-the exact quotations you see in the "text" field. Return ONLY valid JSON matching this schema:
+export const DEFAULT_MODEL = 'qwen3-vl:latest';
+export const DEFAULT_TEMPERATURE = 0.2;
+
+export const DEFAULT_PROMPT = `You are classifying a meme image for a search engine. Look at the picture and read every piece of text in it. Return ONLY a JSON object with these fields and no others:
+- category: one or two words for the main subject, such as "politics", "animals", or "wordplay".
+- keywords: short searchable terms for the concepts, actions, places, and objects that matter. Each term is its own string.
+- style: the medium or visual style, such as "photo", "cartoon", "screenshot", or "comic".
+- intent: one or two sentences on what the meme is doing, such as mocking a person, answering a headline, or making a pun.
+- characters: recognizable people, animals, or institutions. When you do not know a name, use a role such as "man", "woman", "painter", or "chef".
+- text: each distinct piece of visible wording, copied exactly, as its own string. Use an empty array when the image has no text.
+
+Example of the shape, not of the content:
 {
-  "category": "<one main category word>",
-  "keywords": ["word1","word2",...],
-  "style": "<artistic style/medium>",
-  "intent": "<what point(s) is the meme trying to make and how.>"
-  "characters": ["name1", ...],
-  "text": ["exact phrase/text", ...]
+  "category": "animals",
+  "keywords": ["cat", "keyboard", "office"],
+  "style": "photo",
+  "intent": "Jokes that the cat is working at the computer.",
+  "characters": ["cat"],
+  "text": ["I have to work tomorrow"]
 }
-If a field is not present, or is not relevant, use an empty string or empty array. Empty fields are ok. Do not wrap the JSON in markdown or \
-any extra text. Do not describe your role or other irrelevant information. Take your time to analyze the image and return a valid JSON object.`;
+Use an empty string or an empty array when a field does not apply. Do not wrap the JSON in markdown. Do not add commentary.`;
 
 interface Config {
   prompt?: string;
   maxConcurrency?: number;
+  model?: string;
+  temperature?: number;
 }
 
 function readConfig(): Config {
@@ -78,5 +83,44 @@ export function setMaxConcurrency(n: number) {
   if (!Number.isFinite(n) || n < 1) return;
   const cfg = readConfig();
   cfg.maxConcurrency = Math.floor(n);
+  writeConfig(cfg);
+}
+
+function clampTemperature(n: number): number {
+  return Math.min(2, Math.max(0, n));
+}
+
+export function getModel(): string {
+  const env = process.env.OLLAMA_MODEL?.trim();
+  if (env) return env;
+  const cfg = readConfig().model?.trim();
+  return cfg || DEFAULT_MODEL;
+}
+
+export function setModel(model: string | undefined) {
+  const cfg = readConfig();
+  const trimmed = model?.trim();
+  if (!trimmed || trimmed === DEFAULT_MODEL) delete cfg.model;
+  else cfg.model = trimmed;
+  writeConfig(cfg);
+}
+
+export function getTemperature(): number {
+  const env = process.env.OLLAMA_TEMPERATURE;
+  if (env) {
+    const n = Number(env);
+    if (Number.isFinite(n)) return clampTemperature(n);
+  }
+  const cfg = readConfig().temperature;
+  if (typeof cfg === 'number' && Number.isFinite(cfg)) return clampTemperature(cfg);
+  return DEFAULT_TEMPERATURE;
+}
+
+export function setTemperature(n: number) {
+  if (!Number.isFinite(n)) return;
+  const cfg = readConfig();
+  const clamped = clampTemperature(n);
+  if (clamped === DEFAULT_TEMPERATURE) delete cfg.temperature;
+  else cfg.temperature = clamped;
   writeConfig(cfg);
 }

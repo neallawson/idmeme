@@ -10,6 +10,3 @@ export async function hashFile(filePath: string): Promise<string> {
     stream.on('end', () => resolve(hash.digest('hex')));
   });
 }
-
-// Backward alias
-export { hashFile as blake3HashFile };

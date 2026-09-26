@@ -2,8 +2,33 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-import { enqueuePaths, searchImagesAdvanced, db } from './db';
+import {
+  searchImagesAdvanced,
+  db,
+  normalizeFolder,
+  findLatestBatchByFolder,
+  createBatch,
+  listBatches,
+  getBatch,
+  currentJobs,
+  recentFailures,
+  setBatchStatus,
+  retryFailed,
+  cancelPending,
+  addPathsToBatch
+} from './db';
 import { startWorker } from './ingestWorker';
+import {
+  getPrompt,
+  setPrompt,
+  DEFAULT_PROMPT,
+  getMaxConcurrency,
+  setMaxConcurrency,
+  getModel,
+  setModel,
+  getTemperature,
+  setTemperature
+} from './settings';
 import dotenv from 'dotenv';
 import { Readable } from 'stream';
 
@@ -49,22 +74,63 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 });
 
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff']);
+
+function isImagePath(p: string): boolean {
+  return IMAGE_EXTS.has(path.extname(p).toLowerCase());
+}
+
 // Ingest API
 function collectImagePaths(entries: string[]): string[] {
   const result: string[] = [];
   for (const p of entries) {
-    const stat = fs.statSync(p);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(p);
+    } catch {
+      continue;
+    }
     if (stat.isDirectory()) {
-      const children = fs.readdirSync(p).map(c => path.join(p, c));
-      result.push(...collectImagePaths(children));
-    } else if (stat.isFile()) {
-      const ext = path.extname(p).toLowerCase();
-      if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'].includes(ext)) {
-        result.push(p);
+      let children: string[] = [];
+      try {
+        children = fs.readdirSync(p).map(c => path.join(p, c));
+      } catch {
+        continue;
       }
+      result.push(...collectImagePaths(children));
+    } else if (stat.isFile() && isImagePath(p)) {
+      result.push(p);
     }
   }
   return result;
+}
+
+function imagesInDirectory(dir: string, recursive: boolean): string[] {
+  if (recursive) return collectImagePaths([dir]);
+  let children: string[] = [];
+  try {
+    children = fs.readdirSync(dir).map(child => path.join(dir, child));
+  } catch {
+    return [];
+  }
+  return children.filter(child => {
+    try {
+      return fs.statSync(child).isFile() && isImagePath(child);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function namedImages(dir: string, filenames: string[]): { paths: string[] } | { error: string } {
+  const paths: string[] = [];
+  for (const name of filenames) {
+    const full = path.join(dir, name);
+    if (!fs.existsSync(full)) return { error: `File not found: ${full}` };
+    if (!isImagePath(full)) return { error: `Unsupported file: ${full}` };
+    paths.push(full);
+  }
+  return { paths };
 }
 
 app.post('/api/ingest', (req, res) => {
@@ -81,77 +147,82 @@ app.post('/api/ingest', (req, res) => {
     return res.status(400).json({ error: `Directory not found: ${dir}` });
   }
 
-  let paths: string[] = [];
-  if (Array.isArray(filenames) && filenames.length) {
-    // build full paths from dir + filenames
-    for (const name of filenames) {
-      const full = path.join(dir, name);
-      if (!fs.existsSync(full)) {
-        return res.status(400).json({ error: `File not found: ${full}` });
-      }
-      paths.push(full);
-    }
-  } else {
-    // no filenames passed -> treat dir itself
-    if (recursive) {
-      paths = collectImagePaths([dir]);
-    } else {
-      const children = fs.readdirSync(dir).map(c => path.join(dir, c));
-      paths = children.filter(p => fs.statSync(p).isFile());
-    }
+  const folder = normalizeFolder(dir);
+  const existing = findLatestBatchByFolder(folder);
+  if (existing) {
+    return res.json({ created: false, queued: 0, skipped: 0, batch: existing });
   }
 
-  enqueuePaths(paths);
-  res.json({ queued: paths.length });
+  let paths: string[] = [];
+  if (Array.isArray(filenames) && filenames.length) {
+    const named = namedImages(dir, filenames);
+    if ('error' in named) return res.status(400).json({ error: named.error });
+    paths = named.paths;
+  } else {
+    paths = imagesInDirectory(dir, Boolean(recursive));
+  }
+
+  const result = createBatch(folder, Boolean(recursive), paths);
+  res.json({ created: true, ...result });
 });
 
-app.get('/api/ingest', (_req, res) => {
-  // simple listing for now
-  const rows = db.prepare('SELECT * FROM ingest_queue ORDER BY id DESC LIMIT 100').all();
-  res.json(rows);
+app.get('/api/batches', (_req, res) => {
+  res.json(listBatches());
 });
 
-// Ingest summary (counts by status)
-app.get('/api/ingest/summary', (req, res) => {
-  const afterId = req.query.afterId ? Number(req.query.afterId) : undefined;
-  const where = afterId ? 'WHERE id > ?' : '';
-  const totalStmt = db.prepare(`SELECT COUNT(*) as c FROM ingest_queue ${where}`);
-  const total = afterId
-    ? (totalStmt.get(afterId) as { c: number }).c
-    : (totalStmt.get() as { c: number }).c;
-  const groupStmt = db.prepare(`SELECT status, COUNT(*) as c FROM ingest_queue ${where} GROUP BY status`);
-  const rows = (afterId
-    ? groupStmt.all(afterId)
-    : groupStmt.all()) as { status: string; c: number }[];
-  const map: Record<string, number> = { pending: 0, hashing: 0, classifying: 0, done: 0, failed: 0 };
-  for (const r of rows) map[r.status] = r.c;
-  res.json({ total, ...map });
+app.get('/api/batches/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid batch id' });
+  const batch = getBatch(id);
+  if (!batch) return res.status(404).json({ error: 'batch not found' });
+  res.json({ ...batch, current: currentJobs(id), failures: recentFailures(id) });
 });
 
-// Currently classifying items (for previews)
-app.get('/api/ingest/current', (req, res) => {
-  const afterId = req.query.afterId ? Number(req.query.afterId) : undefined;
-  const rows = (afterId
-    ? db
-        .prepare(
-          "SELECT id, path, status, started_at FROM ingest_queue WHERE status = 'classifying' AND id > ? ORDER BY started_at ASC LIMIT 4"
-        )
-        .all(afterId)
-    : db
-        .prepare(
-          "SELECT id, path, status, started_at FROM ingest_queue WHERE status = 'classifying' ORDER BY started_at ASC LIMIT 4"
-        )
-        .all());
-  res.json(rows);
+app.post('/api/batches/:id/pause', (req, res) => {
+  const id = Number(req.params.id);
+  const batch = getBatch(id);
+  if (!batch) return res.status(404).json({ error: 'batch not found' });
+  if (batch.status !== 'running') return res.json({ batch });
+  const updated = setBatchStatus(id, 'paused');
+  res.json({ batch: updated });
 });
 
-// Max id in ingest queue (for clients to set baseline)
-app.get('/api/ingest/max-id', (_req, res) => {
-  const row = db.prepare('SELECT COALESCE(MAX(id), 0) as maxId FROM ingest_queue').get() as { maxId: number };
-  res.json(row);
+app.post('/api/batches/:id/resume', (req, res) => {
+  const id = Number(req.params.id);
+  const batch = getBatch(id);
+  if (!batch) return res.status(404).json({ error: 'batch not found' });
+  const active = batch.pending + batch.hashing + batch.classifying;
+  if (batch.status === 'running' || active === 0) return res.json({ batch });
+  const updated = setBatchStatus(id, 'running');
+  res.json({ batch: updated });
 });
 
-import { getPrompt, setPrompt, DEFAULT_PROMPT, getMaxConcurrency, setMaxConcurrency } from './settings';
+app.post('/api/batches/:id/retry', (req, res) => {
+  const id = Number(req.params.id);
+  const retried = retryFailed(id);
+  if (retried == null) return res.status(404).json({ error: 'batch not found' });
+  res.json({ retried, batch: getBatch(id) });
+});
+
+app.post('/api/batches/:id/cancel-pending', (req, res) => {
+  const id = Number(req.params.id);
+  const cancelled = cancelPending(id);
+  if (cancelled == null) return res.status(404).json({ error: 'batch not found' });
+  res.json({ cancelled, batch: getBatch(id) });
+});
+
+app.post('/api/batches/:id/rescan', (req, res) => {
+  const id = Number(req.params.id);
+  const batch = getBatch(id);
+  if (!batch) return res.status(404).json({ error: 'batch not found' });
+  if (!fs.existsSync(batch.folder) || !fs.statSync(batch.folder).isDirectory()) {
+    return res.status(400).json({ error: `Directory not found: ${batch.folder}` });
+  }
+  const paths = imagesInDirectory(batch.folder, batch.recursive);
+  const added = addPathsToBatch(id, paths);
+  if (!added) return res.status(404).json({ error: 'batch not found' });
+  res.json({ ...added, batch: getBatch(id) });
+});
 
 // Serve local image files safely
 app.get('/api/file', (req, res) => {
@@ -179,16 +250,28 @@ app.put('/api/prompt', (req, res) => {
   res.json({ ok: true });
 });
 
-// Settings API (currently only concurrency)
+// Settings API
 app.get('/api/settings', (_req, res) => {
-  res.json({ maxConcurrency: getMaxConcurrency() });
+  res.json({
+    maxConcurrency: getMaxConcurrency(),
+    model: getModel(),
+    temperature: getTemperature(),
+    modelFromEnv: Boolean(process.env.OLLAMA_MODEL?.trim()),
+    temperatureFromEnv: Boolean(process.env.OLLAMA_TEMPERATURE?.trim())
+  });
 });
 
 app.put('/api/settings', (req, res) => {
-  const { maxConcurrency } = req.body as { maxConcurrency?: number };
+  const { maxConcurrency, model, temperature } = req.body as {
+    maxConcurrency?: number;
+    model?: string;
+    temperature?: number;
+  };
   if (maxConcurrency && Number.isFinite(maxConcurrency) && maxConcurrency >= 1) {
     setMaxConcurrency(Number(maxConcurrency));
   }
+  if (typeof model === 'string') setModel(model);
+  if (typeof temperature === 'number' && Number.isFinite(temperature)) setTemperature(temperature);
   res.json({ ok: true });
 });
 
@@ -200,13 +283,30 @@ app.get('/api/search', (req, res) => {
     if (k === 'q' || k === 'limit') return;
     if (typeof v === 'string') filters[k] = v;
   });
+  const term = q?.trim() || undefined;
   try {
-    const rows = searchImagesAdvanced(filters, q, limit ? Number(limit) : 100);
+    const rows = searchImagesAdvanced(filters, term, limit ? Number(limit) : 100);
     res.json(rows);
   } catch (err) {
+    const message = err instanceof Error ? err.message.toLowerCase() : '';
+    const ftsError =
+      message.includes('fts5') ||
+      message.includes('unterminated string') ||
+      message.includes('unknown special query');
+    if (ftsError) {
+      return res.status(400).json({ error: 'Invalid search query' });
+    }
     console.error('search error', err);
     res.status(500).json({ error: 'search failed' });
   }
+});
+
+// Unique keys from images_kv (for Filtered Search UI) - case-insensitive
+app.get('/api/kv/keys', (_req, res) => {
+  const rows = db
+    .prepare('SELECT DISTINCT LOWER(key) AS key FROM images_kv ORDER BY LOWER(key) ASC')
+    .all() as { key: string }[];
+  res.json(rows.map(r => r.key));
 });
 
 app.get('/api/ingest/:id', (req, res) => {
