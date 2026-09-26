@@ -98,7 +98,7 @@ export function normalizeClassification(raw: Record<string, unknown>): Classific
     style: asString(raw.style).replace(/[.,:;]+$/g, ''),
     intent: asString(raw.intent),
     characters: asStringList(raw.characters, true),
-    text: asStringList(raw.text, false)
+    text: asStringList(raw.text, false),
   };
   const empty =
     !classification.category &&
@@ -118,7 +118,8 @@ function flattenText(value: unknown): string[] {
     return text ? [text] : [];
   }
   if (Array.isArray(value)) return value.flatMap(flattenText);
-  if (typeof value === 'object') return Object.values(value as Record<string, unknown>).flatMap(flattenText);
+  if (typeof value === 'object')
+    return Object.values(value as Record<string, unknown>).flatMap(flattenText);
   return [];
 }
 

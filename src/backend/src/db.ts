@@ -67,7 +67,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
 `;
 
 // Run multiple statements
-schema.split(';').forEach(stmt => {
+schema.split(';').forEach((stmt) => {
   if (stmt.trim()) db.prepare(stmt).run();
 });
 
@@ -89,9 +89,11 @@ export function upsertImage(row: ImageRow): number {
        size = excluded.size,
        hash = excluded.hash,
        updated_at = excluded.updated_at,
-       tags_json = excluded.tags_json`
+       tags_json = excluded.tags_json`,
   ).run(row);
-  const existing = db.prepare('SELECT id FROM images WHERE path = ?').get(row.path) as { id: number };
+  const existing = db.prepare('SELECT id FROM images WHERE path = ?').get(row.path) as {
+    id: number;
+  };
   return existing.id;
 }
 
@@ -102,7 +104,7 @@ export function upsertKv(imageId: number, kv: Record<string, any>) {
     for (const [k, v] of Object.entries(obj)) {
       const key = k.toLowerCase();
       if (Array.isArray(v)) {
-        v.forEach(val => insert.run(imageId, key, String(val)));
+        v.forEach((val) => insert.run(imageId, key, String(val)));
       } else if (v !== undefined && v !== null) {
         insert.run(imageId, key, String(v));
       }
@@ -112,18 +114,18 @@ export function upsertKv(imageId: number, kv: Record<string, any>) {
 }
 
 function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, ch => `\\${ch}`);
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
 function fieldPhrases(raw: string): string[] {
   return raw
     .split(',')
-    .map(part =>
+    .map((part) =>
       part
         .toLowerCase()
         .replace(/[.,!?;:"'`()[\]{}]/g, ' ')
         .replace(/\s+/g, ' ')
-        .trim()
+        .trim(),
     )
     .filter(Boolean);
 }
@@ -143,7 +145,11 @@ export function upsertFts(imageId: number, fullText: string) {
   db.prepare('INSERT INTO images_fts (image_id, full_text) VALUES (?, ?)').run(imageId, fullText);
 }
 
-export function searchImagesAdvanced(filters: Record<string, string>, q?: string, limit = 100): ImageRow[] {
+export function searchImagesAdvanced(
+  filters: Record<string, string>,
+  q?: string,
+  limit = 100,
+): ImageRow[] {
   const filterKeys = Object.keys(filters);
   let sql = `SELECT DISTINCT i.* FROM images i`;
   const params: any[] = [];
@@ -160,7 +166,7 @@ export function searchImagesAdvanced(filters: Record<string, string>, q?: string
       const phrases = fieldPhrases(filters[k] ?? '');
       for (const phrase of phrases) {
         wheres.push(
-          `EXISTS (SELECT 1 FROM images_kv kv WHERE kv.image_id = i.id AND LOWER(kv.key) = LOWER(?) AND ${paddedValueSql()} LIKE ? ESCAPE '\\')`
+          `EXISTS (SELECT 1 FROM images_kv kv WHERE kv.image_id = i.id AND LOWER(kv.key) = LOWER(?) AND ${paddedValueSql()} LIKE ? ESCAPE '\\')`,
         );
         params.push(k, `% ${escapeLike(phrase)} %`);
       }
@@ -173,12 +179,16 @@ export function searchImagesAdvanced(filters: Record<string, string>, q?: string
 }
 
 export function getImageByHashSize(hash: string, size: number): ImageRow | undefined {
-  return db.prepare('SELECT * FROM images WHERE hash = ? AND size = ?').get(hash, size) as ImageRow | undefined;
+  return db.prepare('SELECT * FROM images WHERE hash = ? AND size = ?').get(hash, size) as
+    | ImageRow
+    | undefined;
 }
 
 export function searchImages(term: string): ImageRow[] {
   const like = `%${term}%`;
-  return db.prepare('SELECT * FROM images WHERE tags_json LIKE ? OR path LIKE ?').all(like, like) as ImageRow[];
+  return db
+    .prepare('SELECT * FROM images WHERE tags_json LIKE ? OR path LIKE ?')
+    .all(like, like) as ImageRow[];
 }
 
 // -------- Ingest Queue Helpers --------
@@ -263,17 +273,22 @@ function mapBatch(row: Record<string, unknown>): IngestBatch {
     done: Number(row.done),
     failed: Number(row.failed),
     cancelled: Number(row.cancelled),
-    bytes: Number(row.bytes)
+    bytes: Number(row.bytes),
   };
 }
 
 export function listBatches(): IngestBatch[] {
-  const rows = db.prepare(`${BATCH_SELECT} GROUP BY b.id ORDER BY b.id DESC`).all() as Record<string, unknown>[];
+  const rows = db.prepare(`${BATCH_SELECT} GROUP BY b.id ORDER BY b.id DESC`).all() as Record<
+    string,
+    unknown
+  >[];
   return rows.map(mapBatch);
 }
 
 export function getBatch(id: number): IngestBatch | undefined {
-  const row = db.prepare(`${BATCH_SELECT} WHERE b.id = ? GROUP BY b.id`).get(id) as Record<string, unknown> | undefined;
+  const row = db.prepare(`${BATCH_SELECT} WHERE b.id = ? GROUP BY b.id`).get(id) as
+    | Record<string, unknown>
+    | undefined;
   return row ? mapBatch(row) : undefined;
 }
 
@@ -289,7 +304,7 @@ export function currentJobs(batchId: number): QueueFile[] {
     .prepare(
       `SELECT id, path, status, started_at FROM ingest_queue
        WHERE batch_id = ? AND status IN ('hashing', 'classifying')
-       ORDER BY started_at ASC LIMIT 4`
+       ORDER BY started_at ASC LIMIT 4`,
     )
     .all(batchId) as QueueFile[];
 }
@@ -299,7 +314,7 @@ export function recentFailures(batchId: number): QueueFile[] {
     .prepare(
       `SELECT id, path, error FROM ingest_queue
        WHERE batch_id = ? AND status = 'failed'
-       ORDER BY finished_at DESC LIMIT 8`
+       ORDER BY finished_at DESC LIMIT 8`,
     )
     .all(batchId) as QueueFile[];
 }
@@ -308,7 +323,7 @@ function pauseOtherRunning(exceptId: number) {
   db.prepare(
     `UPDATE ingest_batches
      SET status = 'paused', updated_at = CURRENT_TIMESTAMP
-     WHERE status = 'running' AND id != ?`
+     WHERE status = 'running' AND id != ?`,
   ).run(exceptId);
 }
 
@@ -321,7 +336,7 @@ export function refreshBatchStatus(batchId: number) {
        AND NOT EXISTS (
          SELECT 1 FROM ingest_queue
          WHERE batch_id = ? AND status IN ('pending', 'hashing', 'classifying')
-       )`
+       )`,
   ).run(batchId, batchId);
 }
 
@@ -339,10 +354,10 @@ function insertJobs(batchId: number, paths: string[]): number {
   const activeElsewhere = db.prepare(
     `SELECT 1 FROM ingest_queue
      WHERE path = ? AND batch_id != ? AND status IN ('pending', 'hashing', 'classifying')
-     LIMIT 1`
+     LIMIT 1`,
   );
   const insert = db.prepare(
-    `INSERT INTO ingest_queue (path, batch_id, size, status) VALUES (?, ?, ?, 'pending')`
+    `INSERT INTO ingest_queue (path, batch_id, size, status) VALUES (?, ?, ?, 'pending')`,
   );
   let queued = 0;
   for (const filePath of paths) {
@@ -356,10 +371,20 @@ function insertJobs(batchId: number, paths: string[]): number {
   return queued;
 }
 
+export function ingestFolderBatch(
+  folder: string,
+  recursive: boolean,
+  paths: string[],
+): { created: boolean; queued: number; skipped: number; batch: IngestBatch } {
+  const existing = findLatestBatchByFolder(folder);
+  if (existing) return { created: false, queued: 0, skipped: 0, batch: existing };
+  return { created: true, ...createBatch(folder, recursive, paths) };
+}
+
 export function createBatch(
   folder: string,
   recursive: boolean,
-  paths: string[]
+  paths: string[],
 ): { batch: IngestBatch; queued: number; skipped: number } {
   const tx = db.transaction(() => {
     const info = db
@@ -376,14 +401,17 @@ export function createBatch(
   return tx();
 }
 
-export function addPathsToBatch(batchId: number, paths: string[]): { queued: number; skipped: number } | undefined {
+export function addPathsToBatch(
+  batchId: number,
+  paths: string[],
+): { queued: number; skipped: number } | undefined {
   const existing = getBatch(batchId);
   if (!existing) return undefined;
   const tx = db.transaction(() => {
     const queued = insertJobs(batchId, paths);
     if (queued > 0 && existing.status === 'complete') {
       db.prepare(
-        `UPDATE ingest_batches SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        `UPDATE ingest_batches SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       ).run(batchId);
       pauseOtherRunning(batchId);
     }
@@ -411,12 +439,12 @@ export function retryFailed(batchId: number): number | undefined {
       .prepare(
         `UPDATE ingest_queue
          SET status = 'pending', error = NULL, started_at = NULL, finished_at = NULL
-         WHERE batch_id = ? AND status = 'failed'`
+         WHERE batch_id = ? AND status = 'failed'`,
       )
       .run(batchId);
     if (info.changes > 0) {
       db.prepare(
-        `UPDATE ingest_batches SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        `UPDATE ingest_batches SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       ).run(batchId);
       pauseOtherRunning(batchId);
     }
@@ -432,7 +460,7 @@ export function cancelPending(batchId: number): number | undefined {
       .prepare(
         `UPDATE ingest_queue
          SET status = 'cancelled', error = NULL, finished_at = CURRENT_TIMESTAMP
-         WHERE batch_id = ? AND status = 'pending'`
+         WHERE batch_id = ? AND status = 'pending'`,
       )
       .run(batchId);
     refreshBatchStatus(batchId);
@@ -446,7 +474,7 @@ export function recoverStuckJobs(): number {
     .prepare(
       `UPDATE ingest_queue
        SET status = 'pending', started_at = NULL, error = NULL
-       WHERE status IN ('hashing', 'classifying')`
+       WHERE status IN ('hashing', 'classifying')`,
     )
     .run();
   return info.changes;
@@ -460,12 +488,12 @@ export function getNextPendingJob(): IngestJob | undefined {
          JOIN ingest_batches b ON b.id = q.batch_id
          WHERE q.status = 'pending' AND b.status = 'running'
          ORDER BY b.created_at ASC, q.id ASC
-         LIMIT 1`
+         LIMIT 1`,
       )
       .get() as IngestJob | undefined;
     if (job?.id != null) {
       db.prepare(
-        "UPDATE ingest_queue SET status = 'hashing', started_at = CURRENT_TIMESTAMP WHERE id = ?"
+        "UPDATE ingest_queue SET status = 'hashing', started_at = CURRENT_TIMESTAMP WHERE id = ?",
       ).run(job.id);
     }
     return job;
@@ -478,7 +506,7 @@ export function updateJobStatus(id: number, status: string, error?: string, imag
     `UPDATE ingest_queue
      SET status = ?, error = ?, image_id = ?,
          finished_at = CASE WHEN ? IN ('done', 'failed', 'cancelled') THEN CURRENT_TIMESTAMP ELSE finished_at END
-     WHERE id = ?`
+     WHERE id = ?`,
   ).run(status, error ?? null, imageId ?? null, status, id);
   if (status === 'done' || status === 'failed' || status === 'cancelled') {
     const row = db.prepare('SELECT batch_id FROM ingest_queue WHERE id = ?').get(id) as
@@ -494,12 +522,12 @@ const JOB_RANK: Record<string, number> = {
   pending: 3,
   done: 2,
   failed: 1,
-  cancelled: 0
+  cancelled: 0,
 };
 
 function migrateIngestBatches() {
   const cols = db.prepare('PRAGMA table_info(ingest_queue)').all() as { name: string }[];
-  const names = new Set(cols.map(col => col.name));
+  const names = new Set(cols.map((col) => col.name));
   if (!names.has('batch_id')) db.exec('ALTER TABLE ingest_queue ADD COLUMN batch_id INTEGER');
   if (!names.has('size')) db.exec('ALTER TABLE ingest_queue ADD COLUMN size INTEGER');
 
@@ -516,7 +544,7 @@ function migrateIngestBatches() {
       byFolder.set(folder, list);
     }
     const insertBatch = db.prepare(
-      `INSERT INTO ingest_batches (folder, recursive, status) VALUES (?, 1, ?)`
+      `INSERT INTO ingest_batches (folder, recursive, status) VALUES (?, 1, ?)`,
     );
     const assign = db.prepare('UPDATE ingest_queue SET batch_id = ?, size = ? WHERE id = ?');
     const remove = db.prepare('DELETE FROM ingest_queue WHERE id = ?');
@@ -541,17 +569,26 @@ function migrateIngestBatches() {
       }
       for (const id of drop) remove.run(id);
       const kept = [...best.values()];
-      const active = kept.some(row => row.status === 'pending' || row.status === 'hashing' || row.status === 'classifying');
-      const batchId = Number(insertBatch.run(folder, active ? 'running' : 'complete').lastInsertRowid);
+      const active = kept.some(
+        (row) =>
+          row.status === 'pending' || row.status === 'hashing' || row.status === 'classifying',
+      );
+      const batchId = Number(
+        insertBatch.run(folder, active ? 'running' : 'complete').lastInsertRowid,
+      );
       for (const row of kept) assign.run(batchId, fileSize(row.path), row.id);
     }
   });
   if (orphans.length) assignOrphans();
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_ingest_batch_status ON ingest_queue(batch_id, status)');
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ingest_batch_path ON ingest_queue(batch_id, path)');
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_ingest_batch_path ON ingest_queue(batch_id, path)',
+  );
 
-  const running = db.prepare(`SELECT id FROM ingest_batches WHERE status = 'running' ORDER BY id ASC`).all() as {
+  const running = db
+    .prepare(`SELECT id FROM ingest_batches WHERE status = 'running' ORDER BY id ASC`)
+    .all() as {
     id: number;
   }[];
   if (running.length > 1) {
@@ -560,7 +597,7 @@ function migrateIngestBatches() {
         `SELECT b.id FROM ingest_batches b
          JOIN ingest_queue q ON q.batch_id = b.id
          WHERE b.status = 'running' AND q.status IN ('hashing', 'classifying')
-         ORDER BY b.id ASC LIMIT 1`
+         ORDER BY b.id ASC LIMIT 1`,
       )
       .get() as { id: number } | undefined;
     pauseOtherRunning(active?.id ?? running[0].id);

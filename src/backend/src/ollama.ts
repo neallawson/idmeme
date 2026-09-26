@@ -16,10 +16,10 @@ export async function classifyImage(imagePath: string): Promise<string> {
         {
           role: 'user',
           content: getPrompt(),
-          images: [prepared.base64]
-        }
+          images: [prepared.base64],
+        },
       ],
-      options: { temperature: getTemperature() }
+      options: { temperature: getTemperature() },
     };
 
     const controller = new AbortController();
@@ -31,7 +31,7 @@ export async function classifyImage(imagePath: string): Promise<string> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: controller.signal
+        signal: controller.signal,
       });
     } finally {
       clearTimeout(id);

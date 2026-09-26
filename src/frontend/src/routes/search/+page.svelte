@@ -58,7 +58,7 @@
   <div class="flex gap-2 items-end flex-wrap">
     <div class="flex flex-col">
       <label class="text-sm font-medium" for="full-text">Full Text</label>
-      <input id="full-text" class="input input-bordered" bind:value={$query} placeholder="funny cat meme" />
+      <input id="full-text" class="border rounded px-2 py-1" bind:value={$query} placeholder="funny cat meme" />
     </div>
 
     <!-- Filtered Search -->
@@ -67,7 +67,7 @@
       <div class="flex gap-2 items-end flex-wrap">
         <div class="flex flex-col">
           <label class="text-sm font-medium" for="field-key">Category</label>
-          <select id="field-key" class="input input-bordered" bind:value={selectedKey}>
+          <select id="field-key" class="border rounded px-2 py-1" bind:value={selectedKey}>
             <option value="">-- select a key --</option>
             {#each kvKeys as k}
               <option value={k}>{k}</option>
@@ -76,13 +76,13 @@
         </div>
         <div class="flex flex-col">
           <label class="text-sm font-medium" for="field-phrase">Search for:</label>
-          <input id="field-phrase" class="input input-bordered" bind:value={refineText} placeholder="crying jordan" />
+          <input id="field-phrase" class="border rounded px-2 py-1" bind:value={refineText} placeholder="crying jordan" />
           <span class="text-xs text-gray-600">Whole phrase. Commas mean every term must match.</span>
         </div>
       </div>
     </div>
 
-    <button class="btn btn-primary" on:click={search} disabled={$loading}>Search</button>
+    <button class="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" on:click={search} disabled={$loading}>Search</button>
   </div>
 
   {#if $loading}
@@ -102,8 +102,3 @@
     {/each}
   </div>
 </div>
-
-<style>
-  .input { @apply border rounded px-2 py-1; }
-  .btn { @apply px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50; }
-</style>

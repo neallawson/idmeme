@@ -6,8 +6,7 @@ import {
   searchImagesAdvanced,
   db,
   normalizeFolder,
-  findLatestBatchByFolder,
-  createBatch,
+  ingestFolderBatch,
   listBatches,
   getBatch,
   currentJobs,
@@ -15,7 +14,7 @@ import {
   setBatchStatus,
   retryFailed,
   cancelPending,
-  addPathsToBatch
+  addPathsToBatch,
 } from './db';
 import { startWorker } from './ingestWorker';
 import {
@@ -27,7 +26,7 @@ import {
   getModel,
   setModel,
   getTemperature,
-  setTemperature
+  setTemperature,
 } from './settings';
 import dotenv from 'dotenv';
 import { Readable } from 'stream';
@@ -93,7 +92,7 @@ function collectImagePaths(entries: string[]): string[] {
     if (stat.isDirectory()) {
       let children: string[] = [];
       try {
-        children = fs.readdirSync(p).map(c => path.join(p, c));
+        children = fs.readdirSync(p).map((c) => path.join(p, c));
       } catch {
         continue;
       }
@@ -109,11 +108,11 @@ function imagesInDirectory(dir: string, recursive: boolean): string[] {
   if (recursive) return collectImagePaths([dir]);
   let children: string[] = [];
   try {
-    children = fs.readdirSync(dir).map(child => path.join(dir, child));
+    children = fs.readdirSync(dir).map((child) => path.join(dir, child));
   } catch {
     return [];
   }
-  return children.filter(child => {
+  return children.filter((child) => {
     try {
       return fs.statSync(child).isFile() && isImagePath(child);
     } catch {
@@ -148,11 +147,6 @@ app.post('/api/ingest', (req, res) => {
   }
 
   const folder = normalizeFolder(dir);
-  const existing = findLatestBatchByFolder(folder);
-  if (existing) {
-    return res.json({ created: false, queued: 0, skipped: 0, batch: existing });
-  }
-
   let paths: string[] = [];
   if (Array.isArray(filenames) && filenames.length) {
     const named = namedImages(dir, filenames);
@@ -162,8 +156,7 @@ app.post('/api/ingest', (req, res) => {
     paths = imagesInDirectory(dir, Boolean(recursive));
   }
 
-  const result = createBatch(folder, Boolean(recursive), paths);
-  res.json({ created: true, ...result });
+  res.json(ingestFolderBatch(folder, Boolean(recursive), paths));
 });
 
 app.get('/api/batches', (_req, res) => {
@@ -257,7 +250,7 @@ app.get('/api/settings', (_req, res) => {
     model: getModel(),
     temperature: getTemperature(),
     modelFromEnv: Boolean(process.env.OLLAMA_MODEL?.trim()),
-    temperatureFromEnv: Boolean(process.env.OLLAMA_TEMPERATURE?.trim())
+    temperatureFromEnv: Boolean(process.env.OLLAMA_TEMPERATURE?.trim()),
   });
 });
 
@@ -306,7 +299,7 @@ app.get('/api/kv/keys', (_req, res) => {
   const rows = db
     .prepare('SELECT DISTINCT LOWER(key) AS key FROM images_kv ORDER BY LOWER(key) ASC')
     .all() as { key: string }[];
-  res.json(rows.map(r => r.key));
+  res.json(rows.map((r) => r.key));
 });
 
 app.get('/api/ingest/:id', (req, res) => {

@@ -6,7 +6,7 @@ import {
   upsertKv,
   upsertFts,
   recoverStuckJobs,
-  getImageByHashSize
+  getImageByHashSize,
 } from './db';
 import { hashFile } from './hashing';
 import { classifyImage } from './ollama';
@@ -17,7 +17,11 @@ import { getMaxConcurrency } from './settings';
 const TICK_MS = 500;
 let inFlight = 0;
 
-export function classificationForDuplicate(hash: string, size: number, path: string): Classification | undefined {
+export function classificationForDuplicate(
+  hash: string,
+  size: number,
+  path: string,
+): Classification | undefined {
   const existing = getImageByHashSize(hash, size);
   if (!existing || existing.path === path || !existing.tags_json) return undefined;
   try {
@@ -60,7 +64,7 @@ async function processJob() {
       hash,
       created_at: now,
       updated_at: now,
-      tags_json: tagsJson
+      tags_json: tagsJson,
     });
 
     upsertKv(imageId, parsed);

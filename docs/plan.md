@@ -24,7 +24,7 @@ Done in the working tree.
 
 - [x] Prompt example is valid JSON with real field values. `config.json`, `docs/prompts.txt`, and `DEFAULT_PROMPT` match.
 - [x] Stored records use the six fields only. Keywords and characters split on commas. Text keeps commas and splits on new lines. An empty result fails the job.
-- [x] Requests send the configured model and temperature, and ask for a JSON object. A 400 from `response_format` is retried without it. `OLLAMA_MODEL` and `OLLAMA_TEMPERATURE` still override the settings file.
+- [x] Requests use Ollama's native chat API with the configured model and temperature. Do not send `format: "json"`; it hung on this GPU. `OLLAMA_MODEL` and `OLLAMA_TEMPERATURE` still override the settings file.
 - [x] AI Settings edits model and temperature.
 - [x] A field filter matches a whole phrase. `man` does not match `woman`. Comma-separated terms must all match. The same file bytes at a new path copy the existing classification instead of calling Ollama again. Re-ingest of the same path still classifies.
 

@@ -71,7 +71,7 @@
 <div class="flex flex-col gap-4 max-w-3xl">
   <label class="flex flex-col gap-2">
     <span class="font-medium">Model</span>
-    <input class="input" bind:value={$model} disabled={$modelFromEnv || $saving} />
+    <input class="border rounded px-2 py-1" bind:value={$model} disabled={$modelFromEnv || $saving} />
     {#if $modelFromEnv}
       <span class="text-sm text-gray-600">OLLAMA_MODEL is set, so this value comes from the environment.</span>
     {/if}
@@ -84,7 +84,7 @@
       min="0"
       max="2"
       step="0.1"
-      class="input"
+      class="border rounded px-2 py-1"
       bind:value={$temperature}
       disabled={$temperatureFromEnv || $saving}
     />
@@ -95,25 +95,19 @@
 
   <label class="flex flex-col gap-2">
     <span class="font-medium">Prompt</span>
-    <textarea class="textarea h-60" bind:value={$prompt}></textarea>
+    <textarea class="w-full border rounded px-2 py-1 h-60" bind:value={$prompt}></textarea>
   </label>
 
   <label class="flex flex-col gap-2 w-48">
     <span class="font-medium">Max Concurrency</span>
-    <input type="number" min="1" class="input" bind:value={$maxConcurrency} />
+    <input type="number" min="1" class="border rounded px-2 py-1" bind:value={$maxConcurrency} />
   </label>
 
   <div class="flex gap-4 items-center">
-    <button class="btn btn-primary" on:click={save} disabled={$saving}>Save</button>
-    <button class="btn" on:click={restore} disabled={$saving || $isDefault}>Restore Default</button>
+    <button class="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" on:click={save} disabled={$saving}>Save</button>
+    <button class="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" on:click={restore} disabled={$saving || $isDefault}>Restore Default</button>
     {#if $status}
       <span class="text-green-600">{$status}</span>
     {/if}
   </div>
 </div>
-
-<style>
-  .input { @apply border rounded px-2 py-1; }
-  .textarea { @apply w-full border rounded px-2 py-1; }
-  .btn { @apply px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50; }
-</style>
