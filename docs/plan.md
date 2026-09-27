@@ -41,6 +41,5 @@ Done.
 
 - Production Docker image and the `ollama/ollama:0.1` compose tag. Those files are still in the repo and are not a supported way to run the app. The working path is host Ollama plus the backend on port 3000.
 - `/api/file` and `/api/ingest` accept any local path, with open CORS. Fine for localhost. Do not expose the API on an untrusted network until this is restricted.
-- The frontend uses Vite 7, while the installed SvelteKit still pulls Vite 5. `vite.config.ts` casts past the resulting type error. Align the versions.
 - Svelte files are outside Prettier and ESLint.
 - `npm audit` findings are not triaged.

@@ -180,8 +180,7 @@ export function searchImagesAdvanced(
 
 export function getImageByHashSize(hash: string, size: number): ImageRow | undefined {
   return db.prepare('SELECT * FROM images WHERE hash = ? AND size = ?').get(hash, size) as
-    | ImageRow
-    | undefined;
+    ImageRow | undefined;
 }
 
 export function searchImages(term: string): ImageRow[] {
@@ -287,8 +286,7 @@ export function listBatches(): IngestBatch[] {
 
 export function getBatch(id: number): IngestBatch | undefined {
   const row = db.prepare(`${BATCH_SELECT} WHERE b.id = ? GROUP BY b.id`).get(id) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   return row ? mapBatch(row) : undefined;
 }
 
@@ -510,8 +508,7 @@ export function updateJobStatus(id: number, status: string, error?: string, imag
   ).run(status, error ?? null, imageId ?? null, status, id);
   if (status === 'done' || status === 'failed' || status === 'cancelled') {
     const row = db.prepare('SELECT batch_id FROM ingest_queue WHERE id = ?').get(id) as
-      | { batch_id: number | null }
-      | undefined;
+      { batch_id: number | null } | undefined;
     if (row?.batch_id != null) refreshBatchStatus(row.batch_id);
   }
 }
